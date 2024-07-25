@@ -27,95 +27,78 @@ display_help() {
     echo "  devopsfetch.sh -t '1 hour ago'     # Show activities in the last hour"
 }
 
-# Function to format output as a table
-format_table() {
-    column -t -s $'\t'
-}
 
 # Function to display active ports
 display_ports() {
-    printf "%-15s %-5s %-8s\n" "USER" "PORT" "SERVICE"
-    
-    if [ -z "$1" ]; then
-        sudo lsof -i -P -n | grep LISTEN | awk '{
-            port = $9
-            sub(/.*:/, "", port)
-            user = $3
-            service = $1
-            if (length(service) > 8) service = substr(service, 1, 8)
-            printf "%-15s %-5s %-8s\n", user, port, service
-        }' | sort -k2 -n | uniq
-    else
-        echo "Information for port $1:"
-        result=$(sudo lsof -i :$1 -P -n | grep LISTEN | awk '{
-            port = $9
-            sub(/.*:/, "", port)
-            user = $3
-            service = $1
-            if (length(service) > 8) service = substr(service, 1, 8)
-            printf "%-15s %-5s %-8s\n", user, port, service
-        }')
-        if [ -z "$result" ]; then
-            echo "No service found on port $1"
-        else
-            echo "$result"
-        fi
-    fi
+   echo -e "\035[1m| PORT       | HOST       | SERVICE   | USER       |\035[0m"
+    echo "*************************************************"
+    sudo netstat -tuln | awk 'NR>2 {split($4, a, ":"); port=a[length(a)]; host=a[length(a)-1]; print port, host, $1}' | while read -r port host protocol; do
+        service=$(sudo lsof -i :"$port" | awk 'NR==2 {print $1}')
+        user=$(sudo lsof -i :"$port" | awk 'NR==2 {print $3}')
+        printf "| %-10s | %-10s | %-9s | %-10s |\n" "$port" "$host" "$service" "$user"
+    done
 }
-
+    
 # Function to display Docker information
 display_docker() {
-    if [ -z "$1" ]; then
-         echo "****************************** Docker Images ******************************"
-        docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}" | format_table
-        echo -e "\nDocker Containers:"
-        docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}" | format_table
-    else
-        echo "Container '$1' Details:"
-        docker inspect $1 | jq '.[0] | {Name: .Name, Image: .Config.Image, State: .State.Status, Ports: .NetworkSettings.Ports}'
-    fi
+    echo -e "\035[1mDocker Images:\033[0m"
+    echo -e "\035[1m| REPOSITORY  | TAG       | IMAGE ID  | CREATED           | SIZE   |\035[0m"
+    echo "*******************************************************************"
+    docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedAt}}\t{{.Size}}"
+
+    echo -e "\n\035[1mDocker Containers:\035[0m"
+    echo -e "\035[1m| CONTAINER ID  | IMAGE     | COMMAND  | CREATED           | STATUS  | PORTS     | NAMES   |\035[0m"
+    echo "----------------------------------------------------------------------------------------------"
+    docker ps -a --format "table {{.ID}}\t{{.Image}}\t{{.Command}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}"
 }
 
-# Function to display Nginx information
-display_nginx() {
-    if [ -z "$1" ]; then
-        echo "****************************** Nginx Domains and Ports ******************************"
-        grep -h server_name /etc/nginx/sites-enabled/* | awk '{print $2}' | sed 's/;$//' | \
-        while read domain; do
-            port=$(grep -h "listen " /etc/nginx/sites-enabled/* | grep -v "[::]" | awk '{print $2}' | sed 's/;$//' | head -1)
-            echo -e "$domain\t$port"
-        done | format_table
-    else
-        echo "Nginx Configuration for $1:"
-        grep -rl "server_name $1" /etc/nginx/sites-enabled | xargs cat
-    fi
+container_details() {
+    echo -e "\035[1mContainer details $1:\035[0m"
+    echo -e "\035[1m| CONTAINER ID  | IMAGE     | NAME      | STATUS   | IP ADDRESS   |\035[0m"
+    echo "------------------------------------------------------------"
+    docker inspect "$1" --format "table {{.Id}}\t{{.Image}}\t{{.Name}}\t{{.State.Status}}\t{{.NetworkSettings.IPAddress}}"
 }
 
-# Function to display user information
-display_users() {
-    if [ -z "$1" ]; then
-        echo "Users and Last Login Times:"
-        last -w | awk '!seen[$1]++ {print $1, $3, $4, $5, $6, $7}' | format_table
-    else
-        echo "User '$1' Details:"
-        id $1
-        echo "Last Login:"
-        last $1 | head -1
-    fi
+# Display all Nginx domains and their ports
+nginx_info() {
+    echo -e "\035[1m| NGINX DOMAIN                   | PORT     | HOST       |\035[0m"
+    echo "--------------------------------------------------------"
+    sudo nginx -T 2>/dev/null | awk '
+    /server_name/ {server_name=$2}
+    /listen/ {port=$2; host="localhost"; if (server_name) {printf "| %-30s | %-8s | %-10s |\n", server_name, port, host; server_name=""}}'
 }
 
-# Function to display system logs based on a specific date or date range
-display_system_logs() {
-    local start_date=$1
-    local end_date=$2
+# Detailed configuration information for a specific domain
+domain_info() {
+    echo -e "\035[1mNginx Configuration for Domain $1:\035[0m"
+    sudo nginx -T 2>/dev/null | awk "/server_name $1/,/}/" | sed 's/^\s*//'
+}
 
-    if [ -z "$end_date" ]; then
-        # If only one date is provided, assume it's the start date and set end date to now
-        end_date="now"
-    fi
+# List all users and their last login times
+users_info() {
+    echo -e "\035[1m| USERNAME  | PORT  | LAST LOGIN      |\035[0m"
+    echo "--------------------------------------"
+    lastlog | awk 'NR==1 {next} {printf "| %-9s | %-5s | %-s %-s %-s |\n", $1, $2, $3, $4, $5}'
+}
 
-    echo "Displaying system logs from $start_date to $end_date:"
-    journalctl --since "$start_date" --until "$end_date" | less
+# Detailed information about a specific user
+user_info() {
+    echo -e "\035[1mDetails for User $1:\035[0m"
+    id "$1" | awk -F ' ' '{printf "User ID: %-10s\nGroup ID: %-10s\nGroups: %-s\n", $1, $2, $3}'
+    echo -e "\nLast Login Info:"
+    lastlog | grep "$1" | awk '{print "Last Login: " $3" "$4" "$5}'
+}
+
+# Display activities within a specified time range
+time_range() {
+    echo -e "\035[1m| TIMESTAMP                   | USER  | ACTIVITY               |\035[0m"
+    echo "---------------------------------------------------------------"
+    journalctl --since="$1" --until="$2" --output=short-iso | while read line; do
+        timestamp=$(echo $line | awk '{print $1, $2}')
+        user=$(echo $line | awk '{print $6}')
+        activity=$(echo $line | awk '{print $7, $8, $9, $10}')
+        printf "| %-26s | %-5s | %-20s |\n" "$timestamp" "$user" "$activity"
+    done
 }
 
 # Main logic
@@ -124,39 +107,49 @@ if [ $# -eq 0 ]; then
     exit 1
 fi
 
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -p|--port)
-            display_ports "$2"
-            shift 2
-            ;;
-        -d|--docker)
-            display_docker "$2"
-            shift 2
-            ;;
-        -n|--nginx)
-            display_nginx "$2"
-            shift 2
-            ;;
-        -u|--users)
-            display_users "$2"
-            shift 2
-            ;;
-        -t|--time)
-        if [ -z "$3" ]; then
-            display_system_logs "$2"
+# Parse Command-line Arguments
+case $1 in
+    -p|--port)
+        if [ -z "$2" ]; then
+            active_ports
         else
-            display_system_logs "$2" "$3"
+            port_info "$2"
         fi
         ;;
-        -h|--help)
-            display_help
-            exit 0
-            ;;
-        *)
-            echo "Unknown option: $1"
-            display_help
+    -d|--docker)
+        if [ -z "$2" ]; then
+            display_docker
+        else
+            container_details "$2"
+        fi
+        ;;
+    -n|--nginx)
+        if [ -z "$2" ]; then
+            nginx_info
+        else
+            domain_info "$2"
+        fi
+        ;;
+    -u|--users)
+        if [ -z "$2" ]; then
+            user_logins
+        else
+            user_info "$2"
+        fi
+        ;;
+    -t|--time)
+        if [ -z "$2" ] || [ -z "$3]"; then
+            echo "Please provide a valid time range."
             exit 1
-            ;;
-    esac
-done
+        else
+            time_range "$2" "$3"
+        fi
+        ;;
+    -h|--help)
+        help
+        ;;
+    *)
+        echo "Invalid option. Use -h or --help for usage information."
+        exit 1
+        ;;
+esac
