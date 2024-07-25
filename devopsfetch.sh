@@ -152,7 +152,7 @@ case $1 in
         fi
         ;;
     -h|--help)
-        help
+        display_help
         ;;
     *)
         echo "Invalid option. Use -h or --help for usage information."
