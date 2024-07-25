@@ -1,53 +1,49 @@
 #!/bin/bash
 
-# install_devopsfetch.sh
+install_dependencies() {
+    sudo apt-get update
+    sudo apt-get install -y nginx docker.io net-tools
+}
 
-# Check if script is run as root
-if [ "$EUID" -ne 0 ]; then
-    echo "Please run as root"
-    exit 1
-fi
-
-# Install dependencies
-apt-get update
-apt-get install -y jq nginx docker.io net-tools finger
-
-# Copy main script to /usr/local/bin
-cp devopsfetch.sh /usr/local/bin/devopsfetch
-chmod +x /usr/local/bin/devopsfetch
-
-# Create systemd service file
-cat << EOF > /etc/systemd/system/devopsfetch.service
+configure_service() {
+    sudo bash -c 'cat > /etc/systemd/system/sysinfo.service << EOF
 [Unit]
-Description=DevOps Fetch Service
-After=network.target
+Description=System Information Service
 
 [Service]
-ExecStart=/usr/local/bin/devopsfetch -p -d -n -u
+ExecStart=/path/to/devopsfetch.sh -d
 Restart=always
-User=root
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOF'
+    sudo systemctl daemon-reload
+    sudo systemctl enable sysinfo.service
+    sudo systemctl start sysinfo.service
+}
 
-# reload systemd,enable & start the service
-systemctl daemon-reload
-systemctl enable devopsfetch.service
-systemctl start devopsfetch.service
-
-# Set up log rotation
-cat << EOF > /etc/logrotate.d/devopsfetch
-/var/log/devopsfetch.log {
+configure_log_rotation() {
+    sudo bash -c 'cat > /etc/logrotate.d/sysinfo << EOF
+/path/to/sysinfo.log {
     daily
-    rotate 7
+    missingok
+    rotate 14
     compress
     delaycompress
-    missingok
     notifempty
-    create 644 root root
+    create 0640 root utmp
+    sharedscripts
+    postrotate
+        systemctl restart sysinfo.service > /dev/null
+    endscript
 }
-EOF
+EOF'
+}
 
-echo "DevOps Fetch has been installed and configured."
-echo "You can now use 'devopsfetch' command or check the service status with 'systemctl status devopsfetch'"
+install_all() {
+    install_dependencies
+    configure_service
+    configure_log_rotation
+}
+
+install_all
