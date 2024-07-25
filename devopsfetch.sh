@@ -38,6 +38,12 @@ display_ports() {
         printf "| %-10s | %-10s | %-9s | %-10s |\n" "$port" "$host" "$service" "$user"
     done
 }
+
+# Display detailed information about a specific port
+port_info() {
+    echo -e "\033[1mDetails for Port $1:\035[0m"
+    sudo lsof -i :"$1" | awk 'NR==1 {print "\033[1m| COMMAND | PID  | USER | FD  | TYPE | DEVICE | SIZE/OFF | NODE | NAME \033[0m"; next} {printf "| %-7s | %-4s | %-4s | %-3s | %-4s | %-6s | %-8s | %-4s | %-s\n", $1, $2, $3, $4, $5, $6, $7, $8, $9}'
+}
     
 # Function to display Docker information
 display_docker() {
@@ -111,7 +117,7 @@ fi
 case $1 in
     -p|--port)
         if [ -z "$2" ]; then
-            active_ports
+            display_ports
         else
             port_info "$2"
         fi
