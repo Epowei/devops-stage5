@@ -81,7 +81,7 @@ domain_info() {
 }
 
 # List all users and their last login times
-users_logins() {
+user_logins() {
     echo -e "\035[1m| USERNAME  | PORT  | LAST LOGIN      |\035[0m"
     echo "--------------------------------------"
     lastlog | awk 'NR==1 {next} {printf "| %-9s | %-5s | %-s %-s %-s |\n", $1, $2, $3, $4, $5}'
